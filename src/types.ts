@@ -6,6 +6,7 @@ export interface User {
   email: string;
   about: string;
   avatarColor: string;
+  avatarUrl: string | null;
   createdAt: string;
   lastSeen: string | null;
 }
@@ -71,6 +72,7 @@ export interface Chat {
   updatedAt: string;
   lastMessageAt: string;
   avatarColor: string;
+  avatarUrl: string | null;
   title: string;
   subtitle: string;
   directPeer: User | null;

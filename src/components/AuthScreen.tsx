@@ -1,14 +1,31 @@
 import { useState, type FormEvent } from 'react';
-import { Mail, Lock, User as UserIcon, MessageCircleMore, Shield, Sparkles } from 'lucide-react';
+import {
+  Eye,
+  EyeOff,
+  Lock,
+  Mail,
+  MessageCircleMore,
+  Moon,
+  Shield,
+  Sparkles,
+  Sun,
+  User as UserIcon,
+} from 'lucide-react';
 
 import { useAuth } from '../context/useAuth';
 
-export function AuthScreen() {
+type AuthScreenProps = {
+  theme: 'light' | 'dark';
+  onToggleTheme: () => void;
+};
+
+export function AuthScreen({ theme, onToggleTheme }: AuthScreenProps) {
   const { login, register } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,9 +66,19 @@ export function AuthScreen() {
       </section>
       <section className="auth-panel">
         <form className="auth-form auth-minimal" onSubmit={handleSubmit}>
+          <button
+            className="icon-btn auth-theme-toggle"
+            type="button"
+            onClick={onToggleTheme}
+            aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+            title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+          >
+            {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+          </button>
           <span className="auth-mark" aria-hidden="true">
             <MessageCircleMore size={20} />
           </span>
+          <span className="auth-brand-name">chatrix</span>
           <div className="auth-mode-toggle" role="tablist" aria-label="Authentication mode">
             <button
               className={`mode-btn ${mode === 'login' ? 'active' : ''}`}
@@ -86,6 +113,7 @@ export function AuthScreen() {
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 aria-label="Full name"
+                placeholder="Enter username"
                 required
                 minLength={2}
                 maxLength={30}
@@ -99,19 +127,29 @@ export function AuthScreen() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               aria-label="Email"
+              placeholder="Enter Gmail"
               required
             />
           </div>
           <div className="field compact-field">
             <Lock size={17} />
             <input
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               aria-label="Password"
+              placeholder="Enter password"
               required
               minLength={6}
             />
+            <button
+              className="password-toggle"
+              type="button"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              onClick={() => setShowPassword((previous) => !previous)}
+            >
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
           </div>
 
           {error ? <p className="error-text">{error}</p> : null}

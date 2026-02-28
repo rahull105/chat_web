@@ -20,6 +20,8 @@ export interface AuthContextValue {
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
   updateProfile: (name: string, about: string) => Promise<void>;
+  uploadAvatar: (file: File) => Promise<void>;
+  removeAvatar: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
@@ -127,6 +129,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const uploadAvatar = useCallback(async (file: File) => {
+    try {
+      const payload = new FormData();
+      payload.append('avatar', file);
+      const { data } = await api.patch<{ user: User }>('/auth/me/avatar', payload, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      setUser(data.user);
+    } catch (error) {
+      throw new Error(withMessage(error));
+    }
+  }, []);
+
+  const removeAvatar = useCallback(async () => {
+    try {
+      const { data } = await api.delete<{ user: User }>('/auth/me/avatar');
+      setUser(data.user);
+    } catch (error) {
+      throw new Error(withMessage(error));
+    }
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -136,8 +162,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       register,
       logout,
       updateProfile,
+      uploadAvatar,
+      removeAvatar,
     }),
-    [loading, login, logout, register, token, updateProfile, user],
+    [loading, login, logout, register, token, updateProfile, uploadAvatar, removeAvatar, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

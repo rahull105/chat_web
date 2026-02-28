@@ -11,15 +11,20 @@ import clsx from 'clsx';
 import dayjs from 'dayjs';
 import {
   ArrowLeft,
+  Bell,
+  Camera,
   Check,
   CheckCheck,
+  ChevronDown,
   CirclePlus,
   Edit3,
   Image as ImageIcon,
   KeyRound,
   LogOut,
+  MessageCircle,
   Mic,
   MicOff,
+  Moon,
   Paperclip,
   Phone,
   Pin,
@@ -28,9 +33,9 @@ import {
   Shield,
   Smile,
   Trash2,
-  Users,
   Video,
   VideoOff,
+  Sun,
   Volume2,
   VolumeX,
   X,
@@ -47,6 +52,24 @@ const ENCRYPTED_PLACEHOLDER = '__encrypted__';
 const ENCRYPTION_FAIL = '__decrypt_fail__';
 
 type CallMode = 'audio' | 'video';
+type ChatListTab = 'all' | 'unread' | 'favorites' | 'groups';
+type ThemeMode = 'light' | 'dark';
+type AlertType = 'message' | 'call';
+
+type ChatScreenProps = {
+  theme: ThemeMode;
+  onToggleTheme: () => void;
+};
+
+type AlertItem = {
+  id: string;
+  type: AlertType;
+  chatId: string;
+  title: string;
+  detail: string;
+  createdAt: string;
+  read: boolean;
+};
 
 type CallSession = {
   callId: string;
@@ -130,7 +153,17 @@ function apiErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Operation failed.';
 }
 
-function Avatar({ label, color, size = 42 }: { label: string; color: string; size?: number }) {
+function Avatar({
+  label,
+  color,
+  imageUrl,
+  size = 42,
+}: {
+  label: string;
+  color: string;
+  imageUrl?: string | null;
+  size?: number;
+}) {
   return (
     <span
       className="avatar"
@@ -141,7 +174,7 @@ function Avatar({ label, color, size = 42 }: { label: string; color: string; siz
         minWidth: `${size}px`,
       }}
     >
-      {getInitials(label)}
+      {imageUrl ? <img src={imageUrl} alt={label} /> : getInitials(label)}
     </span>
   );
 }
@@ -153,16 +186,17 @@ function sortChats(items: Chat[]) {
 }
 
 function keyForChat(chatId: string) {
-  return `chatwave-e2ee:${chatId}`;
+  return `chatrix-e2ee:${chatId}`;
 }
 
-export function ChatScreen() {
-  const { user, token, logout, updateProfile } = useAuth();
+export function ChatScreen({ theme, onToggleTheme }: ChatScreenProps) {
+  const { user, token, logout, updateProfile, uploadAvatar, removeAvatar } = useAuth();
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [messagesByChat, setMessagesByChat] = useState<Record<string, Message[]>>({});
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [chatFilter, setChatFilter] = useState('');
+  const [chatListTab, setChatListTab] = useState<ChatListTab>('all');
   const [loadingChats, setLoadingChats] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
 
@@ -185,9 +219,6 @@ export function ChatScreen() {
 
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
 
-  const [profileName, setProfileName] = useState('');
-  const [savingProfile, setSavingProfile] = useState(false);
-
   const [chatKeys, setChatKeys] = useState<Record<string, string>>({});
   const [decryptedMap, setDecryptedMap] = useState<Record<string, string>>({});
 
@@ -203,6 +234,14 @@ export function ChatScreen() {
   const [speakerMuted, setSpeakerMuted] = useState(false);
 
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [showAlerts, setShowAlerts] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileName, setProfileName] = useState(user?.name ?? '');
+  const [profileAbout, setProfileAbout] = useState(user?.about ?? '');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const typingTimerRef = useRef<number | null>(null);
@@ -214,6 +253,8 @@ export function ChatScreen() {
   const callSessionRef = useRef<CallSession | null>(null);
   const activeChatIdRef = useRef<string | null>(null);
   const pendingCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
+  const topbarMenusRef = useRef<HTMLDivElement | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const activeChat = useMemo(
     () => chats.find((chat) => chat.id === activeChatId) ?? null,
@@ -229,16 +270,31 @@ export function ChatScreen() {
 
   const filteredChats = useMemo(() => {
     const query = chatFilter.trim().toLowerCase();
-    if (!query) {
-      return chats;
-    }
-
     return chats.filter((chat) => {
-      const inTitle = chat.title.toLowerCase().includes(query);
-      const inPreview = summarizeMessage(chat.lastMessage).toLowerCase().includes(query);
-      return inTitle || inPreview;
+      const matchesQuery =
+        !query ||
+        chat.title.toLowerCase().includes(query) ||
+        summarizeMessage(chat.lastMessage).toLowerCase().includes(query);
+
+      if (!matchesQuery) {
+        return false;
+      }
+
+      if (chatListTab === 'unread') {
+        return chat.unreadCount > 0;
+      }
+
+      if (chatListTab === 'favorites') {
+        return chat.pinnedCount > 0;
+      }
+
+      if (chatListTab === 'groups') {
+        return chat.type === 'group';
+      }
+
+      return true;
     });
-  }, [chatFilter, chats]);
+  }, [chatFilter, chatListTab, chats]);
 
   const typingNames = useMemo(() => {
     if (!activeChatId || !activeChat) {
@@ -266,6 +322,42 @@ export function ChatScreen() {
 
     return onlineUserIds.has(activeChat.directPeer.id);
   }, [activeChat, onlineUserIds]);
+
+  const unreadAlertsCount = useMemo(
+    () => alerts.reduce((count, entry) => (entry.read ? count : count + 1), 0),
+    [alerts],
+  );
+
+  const addAlert = useCallback(
+    (payload: { type: AlertType; chatId: string; title: string; detail: string; notifyBrowser?: boolean }) => {
+      const entry: AlertItem = {
+        id: crypto.randomUUID(),
+        type: payload.type,
+        chatId: payload.chatId,
+        title: payload.title,
+        detail: payload.detail,
+        createdAt: new Date().toISOString(),
+        read: false,
+      };
+
+      setAlerts((previous) => [entry, ...previous].slice(0, 40));
+
+      if (
+        payload.notifyBrowser &&
+        typeof window !== 'undefined' &&
+        'Notification' in window &&
+        Notification.permission === 'granted'
+      ) {
+        const browserNote = new Notification(payload.title, { body: payload.detail });
+        browserNote.onclick = () => {
+          window.focus();
+          setActiveChatId(payload.chatId);
+          setMobileView('chat');
+        };
+      }
+    },
+    [],
+  );
 
   const updateMessageInState = useCallback(
     (chatId: string, messageId: string, updater: (message: Message) => Message) => {
@@ -491,14 +583,6 @@ export function ChatScreen() {
   );
 
   useEffect(() => {
-    if (!user) {
-      return;
-    }
-
-    setProfileName(user.name);
-  }, [user]);
-
-  useEffect(() => {
     let mounted = true;
 
     async function bootstrap() {
@@ -646,11 +730,13 @@ export function ChatScreen() {
   }, [cameraOff, localStream, micMuted]);
 
   useEffect(() => {
-    if (callSession?.type === 'video' && remoteVideoRef.current) {
-      if (!remoteStream) {
+    if (remoteVideoRef.current) {
+      if (!remoteStream || callSession?.type !== 'video') {
         remoteVideoRef.current.srcObject = null;
       } else {
         remoteVideoRef.current.srcObject = remoteStream;
+        remoteVideoRef.current.muted = speakerMuted;
+        remoteVideoRef.current.volume = 1;
         void remoteVideoRef.current.play().catch(() => {
           // Autoplay can fail silently on some browsers until user gesture.
         });
@@ -658,7 +744,7 @@ export function ChatScreen() {
     }
 
     if (remoteAudioRef.current) {
-      if (!remoteStream) {
+      if (!remoteStream || callSession?.type !== 'audio') {
         remoteAudioRef.current.srcObject = null;
       } else {
         remoteAudioRef.current.srcObject = remoteStream;
@@ -669,10 +755,6 @@ export function ChatScreen() {
         });
       }
     }
-
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.muted = true;
-    }
   }, [callSession, remoteStream, speakerMuted]);
 
   useEffect(() => {
@@ -682,6 +764,43 @@ export function ChatScreen() {
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    setProfileName(user.name);
+    setProfileAbout(user.about ?? '');
+  }, [user]);
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!topbarMenusRef.current) {
+        return;
+      }
+      if (!topbarMenusRef.current.contains(event.target as Node)) {
+        setShowAlerts(false);
+        setShowProfileMenu(false);
+      }
+    };
+
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      return;
+    }
+
+    if (Notification.permission === 'default') {
+      void Notification.requestPermission().catch(() => {
+        // Ignore blocked notification prompts.
+      });
+    }
+  }, []);
 
   useEffect(() => {
     if (!token || !user) {
@@ -699,6 +818,8 @@ export function ChatScreen() {
     };
 
     const handleMessageNew = ({ chatId, message }: { chatId: string; message: Message }) => {
+      const incomingFromPeer = message.senderId !== user.id;
+
       setMessagesByChat((previous) => {
         const existing = previous[chatId] ?? [];
         if (existing.some((entry) => entry.id === message.id)) {
@@ -734,6 +855,16 @@ export function ChatScreen() {
 
       if (chatId === activeChatIdRef.current) {
         void markChatAsRead(chatId);
+      }
+
+      if (incomingFromPeer) {
+        addAlert({
+          type: 'message',
+          chatId,
+          title: message.sender?.name ? `New message from ${message.sender.name}` : 'New message',
+          detail: summarizeMessage(message),
+          notifyBrowser: document.hidden,
+        });
       }
     };
 
@@ -889,6 +1020,13 @@ export function ChatScreen() {
 
     const handleIncomingCall = (payload: IncomingCall) => {
       setIncomingCall(payload);
+      addAlert({
+        type: 'call',
+        chatId: payload.chatId,
+        title: `Incoming ${payload.type} call`,
+        detail: `${payload.callerName} is calling you.`,
+        notifyBrowser: document.hidden,
+      });
     };
 
     const handleAnswered = ({
@@ -988,11 +1126,29 @@ export function ChatScreen() {
       })();
     };
 
-    const handleCallEnded = ({ callId }: { callId: string }) => {
+    const handleCallEnded = ({
+      callId,
+      reason,
+      endedBy,
+    }: {
+      callId: string;
+      reason?: string;
+      endedBy?: string;
+    }) => {
       const currentCall = callSessionRef.current;
       if (!currentCall || currentCall.callId !== callId) {
         setIncomingCall((previous) => (previous?.callId === callId ? null : previous));
         return;
+      }
+
+      if (reason && endedBy && endedBy !== user.id) {
+        addAlert({
+          type: 'call',
+          chatId: currentCall.chatId,
+          title: 'Call ended',
+          detail: `${currentCall.peerName} ${reason === 'rejected' ? 'declined the call.' : 'left the call.'}`,
+          notifyBrowser: false,
+        });
       }
 
       endCallLocally();
@@ -1031,6 +1187,7 @@ export function ChatScreen() {
       disconnectSocket();
     };
   }, [
+    addAlert,
     endCallLocally,
     ensurePeerConnection,
     fetchChats,
@@ -1185,24 +1342,6 @@ export function ChatScreen() {
     }
   }
 
-  async function saveProfile() {
-    if (!profileName.trim()) {
-      setErrorText('Profile name is required.');
-      return;
-    }
-
-    setSavingProfile(true);
-    setErrorText(null);
-
-    try {
-      await updateProfile(profileName, user?.about ?? '');
-    } catch (error) {
-      setErrorText(apiErrorMessage(error));
-    } finally {
-      setSavingProfile(false);
-    }
-  }
-
   async function reactToMessage(messageId: string, emoji: string) {
     try {
       await api.post(`/messages/${messageId}/reactions`, { emoji });
@@ -1253,6 +1392,133 @@ export function ChatScreen() {
     setEncryptOutgoing(true);
   }
 
+  function toggleAlertsPanel() {
+    setShowProfileMenu(false);
+    setShowAlerts((previous) => {
+      const next = !previous;
+      if (next) {
+        setAlerts((current) => current.map((entry) => ({ ...entry, read: true })));
+      }
+      return next;
+    });
+  }
+
+  function openAlert(alert: AlertItem) {
+    setActiveChatId(alert.chatId);
+    setMobileView('chat');
+    setShowAlerts(false);
+    setAlerts((previous) =>
+      previous.map((entry) => (entry.id === alert.id ? { ...entry, read: true } : entry)),
+    );
+  }
+
+  async function saveProfile() {
+    if (!profileName.trim()) {
+      setErrorText('Profile name is required.');
+      return;
+    }
+
+    setSavingProfile(true);
+    setErrorText(null);
+
+    try {
+      await updateProfile(profileName.trim(), profileAbout.trim());
+      await Promise.all([fetchChats(), fetchDirectory()]);
+      setShowProfileModal(false);
+    } catch (error) {
+      setErrorText(apiErrorMessage(error));
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
+  async function handleAvatarChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setErrorText('Please select an image file for profile photo.');
+      return;
+    }
+
+    setUploadingAvatar(true);
+    setErrorText(null);
+    try {
+      await uploadAvatar(file);
+      await Promise.all([fetchChats(), fetchDirectory()]);
+      setShowProfileMenu(false);
+    } catch (error) {
+      setErrorText(apiErrorMessage(error));
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
+  async function handleAvatarRemove() {
+    if (!user?.avatarUrl) {
+      return;
+    }
+
+    setUploadingAvatar(true);
+    setErrorText(null);
+    try {
+      await removeAvatar();
+      await Promise.all([fetchChats(), fetchDirectory()]);
+      setShowProfileMenu(false);
+    } catch (error) {
+      setErrorText(apiErrorMessage(error));
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
+  async function requestCallMedia(type: CallMode): Promise<{ stream: MediaStream; hasVideo: boolean }> {
+    const audioConstraints: MediaTrackConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    };
+
+    if (type === 'audio') {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints,
+        video: false,
+      });
+      return { stream, hasVideo: false };
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints,
+        video: {
+          facingMode: 'user',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      });
+      return { stream, hasVideo: stream.getVideoTracks().length > 0 };
+    } catch {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: audioConstraints,
+          video: {
+            facingMode: 'user',
+          },
+        });
+        return { stream, hasVideo: stream.getVideoTracks().length > 0 };
+      } catch {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: audioConstraints,
+          video: false,
+        });
+        return { stream, hasVideo: false };
+      }
+    }
+  }
+
   async function startCall(type: CallMode) {
     if (!activeChat || !activeChatId || !activeChat.directPeer) {
       setErrorText('Calls are available in direct chats.');
@@ -1265,24 +1531,10 @@ export function ChatScreen() {
       setCameraOff(false);
       setSpeakerMuted(false);
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-        video:
-          type === 'video'
-            ? {
-                facingMode: 'user',
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              }
-            : false,
-      });
-
-      if (type === 'video' && stream.getVideoTracks().length === 0) {
+      const { stream, hasVideo } = await requestCallMedia(type);
+      if (type === 'video' && !hasVideo) {
         setCameraOff(true);
+        setErrorText('Camera unavailable. Starting call with audio only.');
       }
 
       localStreamRef.current = stream;
@@ -1305,48 +1557,6 @@ export function ChatScreen() {
         });
       });
     } catch {
-      if (type === 'video') {
-        try {
-          const fallback = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-            },
-            video: false,
-          });
-          localStreamRef.current = fallback;
-          setLocalStream(fallback);
-          setCameraOff(true);
-          setErrorText('Camera unavailable. Starting call with audio only.');
-
-          getSocket()?.emit(
-            'call:start',
-            { chatId: activeChatId, type },
-            (response: { ok: boolean; callId?: string; message?: string }) => {
-              if (!response.ok || !response.callId) {
-                cleanupCallMedia();
-                setErrorText(response.message ?? 'Unable to start call.');
-                return;
-              }
-
-              setCallSession({
-                callId: response.callId,
-                chatId: activeChatId,
-                type,
-                peerId: activeChat.directPeer!.id,
-                peerName: activeChat.directPeer!.name,
-                status: 'outgoing',
-              });
-            },
-          );
-          return;
-        } catch {
-          setErrorText('Microphone/camera permission denied.');
-          return;
-        }
-      }
-
       setErrorText('Microphone/camera permission denied.');
     }
   }
@@ -1362,24 +1572,10 @@ export function ChatScreen() {
       setCameraOff(false);
       setSpeakerMuted(false);
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-        video:
-          incomingCall.type === 'video'
-            ? {
-                facingMode: 'user',
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              }
-            : false,
-      });
-
-      if (incomingCall.type === 'video' && stream.getVideoTracks().length === 0) {
+      const { stream, hasVideo } = await requestCallMedia(incomingCall.type);
+      if (incomingCall.type === 'video' && !hasVideo) {
         setCameraOff(true);
+        setErrorText('Camera unavailable. Joined call with audio only.');
       }
 
       localStreamRef.current = stream;
@@ -1400,42 +1596,6 @@ export function ChatScreen() {
       });
       setIncomingCall(null);
     } catch {
-      if (incomingCall.type === 'video') {
-        try {
-          const fallback = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-            },
-            video: false,
-          });
-          localStreamRef.current = fallback;
-          setLocalStream(fallback);
-          setCameraOff(true);
-          setErrorText('Camera unavailable. Joined call with audio only.');
-
-          getSocket()?.emit('call:answer', {
-            callId: incomingCall.callId,
-            accepted: true,
-          });
-
-          setCallSession({
-            callId: incomingCall.callId,
-            chatId: incomingCall.chatId,
-            type: incomingCall.type,
-            peerId: incomingCall.callerId,
-            peerName: incomingCall.callerName,
-            status: 'incoming',
-          });
-          setIncomingCall(null);
-          return;
-        } catch {
-          setErrorText('Unable to access media devices.');
-          return;
-        }
-      }
-
       setErrorText('Unable to access media devices.');
     }
   }
@@ -1535,137 +1695,272 @@ export function ChatScreen() {
   }
 
   return (
-    <main className="chat-layout nova-theme">
-      <aside className={clsx('sidebar', mobileView === 'chat' && 'hidden-mobile')}>
-        <header className="sidebar-header">
-          <div className="profile-inline">
-            <Avatar label={user?.name ?? 'Me'} color={user?.avatarColor ?? '#0f9d58'} />
-            <div>
-              <strong>{user?.name}</strong>
-              <span>{user?.email}</span>
-            </div>
-          </div>
+    <main className="chat-shell">
+      <header className="workspace-topbar">
+        <div className="workspace-brand">
+          <strong>chatrix</strong>
+        </div>
 
-          <div className="header-actions">
-            <button className="icon-btn" type="button" onClick={() => setShowGroupModal(true)}>
-              <Users size={19} />
-            </button>
-          </div>
-        </header>
-
-        <div className="search-wrap">
+        <div className="workspace-search">
           <Search size={16} />
           <input
             value={chatFilter}
             onChange={(event) => setChatFilter(event.target.value)}
-            placeholder="Search chats"
+            placeholder="Search..."
           />
-          <button className="icon-btn" type="button" onClick={() => setShowGroupModal(true)}>
-            <CirclePlus size={17} />
+        </div>
+
+        <div className="workspace-actions" ref={topbarMenusRef}>
+          <button
+            className="icon-btn topbar-icon"
+            type="button"
+            aria-label="Alerts"
+            onClick={toggleAlertsPanel}
+          >
+            <Bell size={16} />
+            {unreadAlertsCount > 0 ? <span className="alert-dot">{Math.min(unreadAlertsCount, 9)}</span> : null}
           </button>
-        </div>
+          <button
+            className="icon-btn topbar-icon"
+            type="button"
+            onClick={onToggleTheme}
+            aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+            title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+          >
+            {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
+          </button>
+          <button
+            className="icon-btn topbar-icon"
+            type="button"
+            aria-label="New conversation"
+            onClick={() => setShowGroupModal(true)}
+          >
+            <MessageCircle size={16} />
+          </button>
 
-        <div className="search-wrap secondary">
-          <Search size={16} />
+          <button
+            className="profile-trigger"
+            type="button"
+            aria-label="Profile menu"
+            onClick={() => {
+              setShowAlerts(false);
+              setShowProfileMenu((previous) => !previous);
+            }}
+          >
+            <Avatar
+              label={user?.name ?? 'Me'}
+              color={user?.avatarColor ?? '#0f9d58'}
+              imageUrl={user?.avatarUrl}
+              size={34}
+            />
+            <ChevronDown size={14} />
+          </button>
           <input
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Find people by name or email"
+            ref={avatarInputRef}
+            type="file"
+            hidden
+            accept="image/*"
+            onChange={(event) => void handleAvatarChange(event)}
           />
-        </div>
 
-        {searchResults.length > 0 ? (
-          <section className="results-panel">
-            {searchResults.map((candidate) => (
-              <button
-                key={candidate.id}
-                className="result-item"
-                type="button"
-                onClick={() => void startDirectChat(candidate.id)}
-              >
-                <Avatar label={candidate.name} color={candidate.avatarColor} size={34} />
-                <div>
-                  <strong>{candidate.name}</strong>
-                  <span>{candidate.email}</span>
-                </div>
-              </button>
-            ))}
-          </section>
-        ) : null}
-
-        <section className="chat-list">
-          {loadingChats ? <p className="muted">Loading chats...</p> : null}
-          {!loadingChats && filteredChats.length === 0 ? (
-            <p className="muted">No chats yet. Start with email search above.</p>
+          {showAlerts ? (
+            <section className="alerts-panel">
+              <header>
+                <strong>Alerts</strong>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => setAlerts([])}
+                  disabled={alerts.length === 0}
+                >
+                  Clear
+                </button>
+              </header>
+              {alerts.length === 0 ? <p className="muted">No alerts yet.</p> : null}
+              {alerts.map((alert) => (
+                <button
+                  key={alert.id}
+                  type="button"
+                  className={clsx('alert-item', !alert.read && 'unread')}
+                  onClick={() => openAlert(alert)}
+                >
+                  <div>
+                    <strong>{alert.title}</strong>
+                    <span>{alert.detail}</span>
+                  </div>
+                  <time>{formatChatTime(alert.createdAt)}</time>
+                </button>
+              ))}
+            </section>
           ) : null}
 
-          {filteredChats.map((chat) => {
-            const active = chat.id === activeChatId;
-            const peerOnline =
-              chat.type === 'direct' && chat.directPeer ? onlineUserIds.has(chat.directPeer.id) : false;
-
-            return (
+          {showProfileMenu ? (
+            <section className="profile-menu">
               <button
                 type="button"
-                key={chat.id}
-                className={clsx('chat-item', active && 'active')}
                 onClick={() => {
-                  setActiveChatId(chat.id);
-                  setMobileView('chat');
+                  setShowProfileModal(true);
+                  setShowProfileMenu(false);
                 }}
               >
-                <div className="chat-item-avatar">
-                  <Avatar label={chat.title} color={chat.avatarColor} size={45} />
-                  {peerOnline ? <span className="online-dot" /> : null}
-                </div>
-                <div className="chat-item-body">
-                  <div className="chat-item-top">
-                    <strong>{chat.title}</strong>
-                    <span>{formatChatTime(chat.lastMessage?.createdAt ?? chat.lastMessageAt)}</span>
-                  </div>
-                  <div className="chat-item-bottom">
-                    <span>{summarizeMessage(chat.lastMessage)}</span>
-                    <div className="mini-badges">
-                      {chat.pinnedCount > 0 ? <small>{chat.pinnedCount} pin</small> : null}
-                      {chat.unreadCount > 0 ? <em>{chat.unreadCount}</em> : null}
-                    </div>
-                  </div>
-                </div>
+                Edit profile
               </button>
-            );
-          })}
-        </section>
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={uploadingAvatar}
+              >
+                {uploadingAvatar ? 'Uploading...' : 'Upload photo'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleAvatarRemove()}
+                disabled={!user?.avatarUrl || uploadingAvatar}
+              >
+                Remove photo
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowProfileMenu(false);
+                  logout();
+                }}
+              >
+                <LogOut size={14} />
+                Logout
+              </button>
+            </section>
+          ) : null}
+        </div>
+      </header>
 
-        <section className="profile-panel compact">
-          <label>
-            <span>Name</span>
-            <input
-              value={profileName}
-              onChange={(event) => setProfileName(event.target.value)}
-              maxLength={30}
-            />
-          </label>
-          <div className="profile-actions">
-            <button className="primary-btn" type="button" onClick={saveProfile} disabled={savingProfile}>
-              {savingProfile ? 'Saving...' : 'Save'}
+      <section className="chat-layout">
+        <aside className={clsx('sidebar', mobileView === 'chat' && 'hidden-mobile')}>
+          <header className="sidebar-header sidebar-heading">
+            <h2>Messages</h2>
+            <button className="icon-btn" type="button" onClick={() => setShowGroupModal(true)}>
+              <CirclePlus size={16} />
             </button>
-            <button className="ghost-btn" type="button" onClick={logout}>
-              <LogOut size={15} />
-              Logout
+          </header>
+
+          <div className="sidebar-tabs">
+            <button className={clsx(chatListTab === 'all' && 'active')} type="button" onClick={() => setChatListTab('all')}>
+              All messages
+            </button>
+            <button className={clsx(chatListTab === 'unread' && 'active')} type="button" onClick={() => setChatListTab('unread')}>
+              Unread
+            </button>
+            <button
+              className={clsx(chatListTab === 'favorites' && 'active')}
+              type="button"
+              onClick={() => setChatListTab('favorites')}
+            >
+              Favorites
+            </button>
+            <button className={clsx(chatListTab === 'groups' && 'active')} type="button" onClick={() => setChatListTab('groups')}>
+              Groups
             </button>
           </div>
-        </section>
-      </aside>
 
-      <section className={clsx('chat-main', mobileView === 'list' && 'hidden-mobile')}>
-        {activeChat ? (
-          <>
+          <div className="search-wrap secondary sidebar-search">
+            <Search size={16} />
+            <input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Find people by name or email"
+            />
+          </div>
+
+          {searchResults.length > 0 ? (
+            <section className="results-panel">
+              {searchResults.map((candidate) => (
+                <button
+                  key={candidate.id}
+                  className="result-item"
+                  type="button"
+                  onClick={() => void startDirectChat(candidate.id)}
+                >
+                  <Avatar
+                    label={candidate.name}
+                    color={candidate.avatarColor}
+                    imageUrl={candidate.avatarUrl}
+                    size={34}
+                  />
+                  <div>
+                    <strong>{candidate.name}</strong>
+                    <span>{candidate.email}</span>
+                  </div>
+                </button>
+              ))}
+            </section>
+          ) : null}
+
+          <section className="chat-list">
+            {loadingChats ? <p className="muted">Loading chats...</p> : null}
+            {!loadingChats && filteredChats.length === 0 ? (
+              <p className="muted">
+                {chatListTab === 'unread'
+                  ? 'No unread chats.'
+                  : chatListTab === 'favorites'
+                    ? 'No favorite chats yet.'
+                    : chatListTab === 'groups'
+                      ? 'No group chats yet.'
+                      : 'No chats yet. Start with email search above.'}
+              </p>
+            ) : null}
+
+            {filteredChats.map((chat) => {
+              const active = chat.id === activeChatId;
+              const peerOnline =
+                chat.type === 'direct' && chat.directPeer ? onlineUserIds.has(chat.directPeer.id) : false;
+
+              return (
+                <button
+                  type="button"
+                  key={chat.id}
+                  className={clsx('chat-item', active && 'active')}
+                  onClick={() => {
+                    setActiveChatId(chat.id);
+                    setMobileView('chat');
+                  }}
+                >
+                  <div className="chat-item-avatar">
+                    <Avatar label={chat.title} color={chat.avatarColor} imageUrl={chat.avatarUrl} size={45} />
+                    {peerOnline ? <span className="online-dot" /> : null}
+                  </div>
+                  <div className="chat-item-body">
+                    <div className="chat-item-top">
+                      <strong>{chat.title}</strong>
+                      <span>{formatChatTime(chat.lastMessage?.createdAt ?? chat.lastMessageAt)}</span>
+                    </div>
+                    <div className="chat-item-bottom">
+                      <span>{summarizeMessage(chat.lastMessage)}</span>
+                      <div className="mini-badges">
+                        {chat.pinnedCount > 0 ? <small>{chat.pinnedCount} pin</small> : null}
+                        {chat.unreadCount > 0 ? <em>{chat.unreadCount}</em> : null}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </section>
+        </aside>
+
+        <section className={clsx('chat-main', mobileView === 'list' && 'hidden-mobile')}>
+          {activeChat ? (
+            <>
             <header className="chat-main-header">
               <div className="chat-main-header-info">
                 <button className="icon-btn mobile-only" type="button" onClick={() => setMobileView('list')}>
                   <ArrowLeft size={18} />
                 </button>
-                <Avatar label={activeChat.title} color={activeChat.avatarColor} size={43} />
+                <Avatar
+                  label={activeChat.title}
+                  color={activeChat.avatarColor}
+                  imageUrl={activeChat.avatarUrl}
+                  size={43}
+                />
                 <div>
                   <strong>{activeChat.title}</strong>
                   <span>
@@ -1899,14 +2194,65 @@ export function ChatScreen() {
                 </button>
               </div>
             </form>
-          </>
-        ) : (
-          <div className="empty-state">
-            <h2>Your chats will appear here</h2>
-            <p>Use search to find contacts by email and start messaging instantly.</p>
-          </div>
-        )}
+            </>
+          ) : (
+            <div className="empty-state">
+              <span className="empty-icon">💬</span>
+              <h2>No conversation selected</h2>
+              <p>You can view your conversation in the side bar</p>
+            </div>
+          )}
+        </section>
       </section>
+
+      {showProfileModal ? (
+        <section className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal-card profile-modal">
+            <header>
+              <h3>Profile</h3>
+              <button className="icon-btn" type="button" onClick={() => setShowProfileModal(false)}>
+                <X size={16} />
+              </button>
+            </header>
+
+            <div className="profile-modal-avatar">
+              <Avatar
+                label={user?.name ?? 'Me'}
+                color={user?.avatarColor ?? '#0f9d58'}
+                imageUrl={user?.avatarUrl}
+                size={74}
+              />
+              <button
+                className="ghost-btn"
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={uploadingAvatar}
+              >
+                <Camera size={14} />
+                {uploadingAvatar ? 'Uploading...' : 'Change photo'}
+              </button>
+            </div>
+
+            <label>
+              <span>Name</span>
+              <input value={profileName} onChange={(event) => setProfileName(event.target.value)} maxLength={30} />
+            </label>
+
+            <label>
+              <span>About</span>
+              <input
+                value={profileAbout}
+                onChange={(event) => setProfileAbout(event.target.value)}
+                maxLength={120}
+              />
+            </label>
+
+            <button className="primary-btn" type="button" onClick={() => void saveProfile()} disabled={savingProfile}>
+              {savingProfile ? 'Saving...' : 'Save profile'}
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       {showGroupModal ? (
         <section className="modal-backdrop" role="dialog" aria-modal="true">
@@ -1950,7 +2296,12 @@ export function ChatScreen() {
                     )
                   }
                 >
-                  <Avatar label={candidate.name} color={candidate.avatarColor} size={34} />
+                  <Avatar
+                    label={candidate.name}
+                    color={candidate.avatarColor}
+                    imageUrl={candidate.avatarUrl}
+                    size={34}
+                  />
                   <div>
                     <strong>{candidate.name}</strong>
                     <span>{candidate.email}</span>
@@ -2003,7 +2354,7 @@ export function ChatScreen() {
               <audio ref={remoteAudioRef} autoPlay playsInline className="remote-audio" />
               {callSession.type === 'video' ? (
                 <>
-                  <video ref={remoteVideoRef} autoPlay playsInline muted className="remote-video" />
+                  <video ref={remoteVideoRef} autoPlay playsInline className="remote-video" />
                   <video ref={localVideoRef} autoPlay muted playsInline className="local-video" />
                   {cameraOff || (localStream?.getVideoTracks().length ?? 0) === 0 ? (
                     <div className="local-video-placeholder">

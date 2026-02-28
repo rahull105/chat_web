@@ -27,6 +27,10 @@ const ORIGIN_ALLOWLIST = CLIENT_ORIGIN.split(',')
   .filter(Boolean);
 const ALLOW_ALL_ORIGINS = ORIGIN_ALLOWLIST.includes('*');
 
+if (process.env.NODE_ENV === 'production' && JWT_SECRET === 'change-me-in-production') {
+  throw new Error('Set a strong JWT_SECRET in production.');
+}
+
 const DEFAULT_DB = {
   users: [],
   chats: [],
@@ -35,6 +39,42 @@ const DEFAULT_DB = {
 };
 
 const STATUS_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_NAME_LENGTH = 30;
+const MAX_EMAIL_LENGTH = 160;
+const MAX_ABOUT_LENGTH = 120;
+const MAX_PASSWORD_LENGTH = 72;
+const MAX_MESSAGE_LENGTH = 4000;
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const STRONG_PASSWORD_REGEX =
+  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[ !"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]).{8,72}$/;
+
+const ALLOWED_UPLOAD_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain',
+]);
+
+const BLOCKED_UPLOAD_EXTENSIONS = new Set([
+  '.bat',
+  '.cmd',
+  '.com',
+  '.cpl',
+  '.exe',
+  '.jar',
+  '.js',
+  '.msi',
+  '.ps1',
+  '.scr',
+  '.sh',
+]);
 
 const avatarPalette = [
   '#0f9d58',
@@ -65,8 +105,14 @@ function readDb() {
     const content = fs.readFileSync(DB_PATH, 'utf-8');
     const parsed = JSON.parse(content);
     return {
-      users: parsed.users ?? [],
-      chats: parsed.chats ?? [],
+      users: (parsed.users ?? []).map((user) => ({
+        ...user,
+        avatarUrl: user.avatarUrl ?? null,
+      })),
+      chats: (parsed.chats ?? []).map((chat) => ({
+        ...chat,
+        avatarUrl: chat.avatarUrl ?? null,
+      })),
       messages: (parsed.messages ?? []).map((message) => ({
         ...message,
         attachments: Array.isArray(message.attachments) ? message.attachments : [],
@@ -191,6 +237,7 @@ function shapeChatForUser(db, chat, userId) {
     title,
     subtitle,
     avatarColor: chat.type === 'group' ? chat.avatarColor : directPeer?.avatarColor ?? chat.avatarColor,
+    avatarUrl: chat.type === 'group' ? chat.avatarUrl ?? null : directPeer?.avatarUrl ?? chat.avatarUrl ?? null,
     directPeer,
     members,
     unreadCount,
@@ -301,6 +348,18 @@ function shapeStatus(db, status, viewerId) {
   };
 }
 
+function removeUploadFileIfExists(fileUrl) {
+  if (!fileUrl || typeof fileUrl !== 'string' || !fileUrl.startsWith('/uploads/')) {
+    return;
+  }
+
+  const filename = path.basename(fileUrl);
+  const targetPath = path.join(UPLOAD_DIR, filename);
+  if (fs.existsSync(targetPath)) {
+    fs.unlinkSync(targetPath);
+  }
+}
+
 function isOriginAllowed(origin) {
   if (!origin) {
     return true;
@@ -313,9 +372,120 @@ function isOriginAllowed(origin) {
   return ORIGIN_ALLOWLIST.includes(origin);
 }
 
+function normalizeText(value, maxLength) {
+  return String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function normalizeEmail(value) {
+  return normalizeText(value, MAX_EMAIL_LENGTH).toLowerCase();
+}
+
+function normalizeMessage(value) {
+  return String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim();
+}
+
+function isStrongPassword(password) {
+  return STRONG_PASSWORD_REGEX.test(password);
+}
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.socket.remoteAddress ?? 'unknown';
+}
+
+const rateLimitBuckets = new Map();
+
+function createRateLimiter({ windowMs, max, keyPrefix, message }) {
+  return (req, res, next) => {
+    const now = Date.now();
+    const key = `${keyPrefix}:${getClientIp(req)}`;
+    const current = rateLimitBuckets.get(key);
+
+    if (!current || current.resetAt <= now) {
+      rateLimitBuckets.set(key, {
+        count: 1,
+        resetAt: now + windowMs,
+      });
+      return next();
+    }
+
+    if (current.count >= max) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      return res.status(429).json({ message });
+    }
+
+    current.count += 1;
+    rateLimitBuckets.set(key, current);
+    return next();
+  };
+}
+
+const registerLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  keyPrefix: 'register',
+  message: 'Too many registration attempts. Please try again later.',
+});
+
+const loginLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 12,
+  keyPrefix: 'login',
+  message: 'Too many login attempts. Please try again later.',
+});
+
+const messageLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyPrefix: 'message',
+  message: 'Too many messages in a short time. Please slow down.',
+});
+
 ensureStorage();
 
 const app = express();
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()');
+
+  const contentSecurityPolicy = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "img-src 'self' data: blob: https:",
+    "media-src 'self' data: blob:",
+    "connect-src 'self' https: ws: wss:",
+    "form-action 'self'",
+  ].join('; ');
+
+  res.setHeader('Content-Security-Policy', contentSecurityPolicy);
+
+  const forwardedProto = req.headers['x-forwarded-proto'];
+  if (req.secure || forwardedProto === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  }
+
+  next();
+});
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
@@ -357,6 +527,27 @@ const upload = multer({
   limits: {
     files: 5,
     fileSize: 15 * 1024 * 1024,
+  },
+  fileFilter(_req, file, callback) {
+    const extension = path.extname(file.originalname ?? '').toLowerCase();
+    const mimeType = String(file.mimetype ?? '').toLowerCase();
+
+    if (BLOCKED_UPLOAD_EXTENSIONS.has(extension)) {
+      callback(new Error('Unsupported file type.'));
+      return;
+    }
+
+    if (
+      mimeType.startsWith('image/') ||
+      mimeType.startsWith('video/') ||
+      mimeType.startsWith('audio/') ||
+      ALLOWED_UPLOAD_MIME_TYPES.has(mimeType)
+    ) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error('Unsupported file type.'));
   },
 });
 
@@ -412,6 +603,7 @@ function buildChatIfMissing(db, userAId, userBId) {
     updatedAt: now,
     lastMessageAt: now,
     avatarColor: colorFromSeed(`${userAId}-${userBId}`),
+    avatarUrl: null,
   };
 
   db.chats.push(chat);
@@ -437,7 +629,11 @@ function createAndBroadcastMessage({
     throw new Error('You are not a member of this chat.');
   }
 
-  const cleanText = String(text ?? '').trim();
+  const cleanText = normalizeMessage(text);
+  if (cleanText.length > MAX_MESSAGE_LENGTH) {
+    throw new Error('Message is too long.');
+  }
+
   if (!cleanText && attachments.length === 0) {
     throw new Error('Message cannot be empty.');
   }
@@ -483,22 +679,33 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', registerLimiter, async (req, res) => {
   try {
-    const name = String(req.body?.name ?? '').trim();
-    const email = String(req.body?.email ?? '').toLowerCase().trim();
+    const name = normalizeText(req.body?.name, MAX_NAME_LENGTH);
+    const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password ?? '');
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Name, email and password are required.' });
     }
 
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
+    if (name.length < 2) {
+      return res.status(400).json({ message: 'Username must be at least 2 characters.' });
+    }
+
+    if (!EMAIL_REGEX.test(email)) {
       return res.status(400).json({ message: 'Enter a valid email address.' });
     }
 
-    if (password.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+    if (password.length > MAX_PASSWORD_LENGTH) {
+      return res.status(400).json({ message: 'Password is too long.' });
+    }
+
+    if (!isStrongPassword(password)) {
+      return res.status(400).json({
+        message:
+          'Password must be 8-72 chars and include uppercase, lowercase, number and symbol.',
+      });
     }
 
     const db = readDb();
@@ -513,8 +720,9 @@ app.post('/api/auth/register', async (req, res) => {
       name,
       email,
       passwordHash: await bcrypt.hash(password, 10),
-      about: 'Hey there! I am using ChatWave.',
+      about: 'Hey there! I am using chatrix.',
       avatarColor: colorFromSeed(email),
+      avatarUrl: null,
       createdAt: now,
       lastSeen: null,
     };
@@ -529,13 +737,17 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   try {
-    const email = String(req.body?.email ?? '').toLowerCase().trim();
+    const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password ?? '');
 
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password are required.' });
+    }
+
+    if (password.length > MAX_PASSWORD_LENGTH) {
+      return res.status(400).json({ message: 'Invalid email or password.' });
     }
 
     const db = readDb();
@@ -566,11 +778,15 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 
 app.patch('/api/auth/me', requireAuth, (req, res) => {
   try {
-    const name = String(req.body?.name ?? '').trim();
-    const about = String(req.body?.about ?? '').trim();
+    const name = normalizeText(req.body?.name, MAX_NAME_LENGTH);
+    const about = normalizeText(req.body?.about, MAX_ABOUT_LENGTH);
 
     if (!name) {
       return res.status(400).json({ message: 'Name cannot be empty.' });
+    }
+
+    if (name.length < 2) {
+      return res.status(400).json({ message: 'Name must be at least 2 characters.' });
     }
 
     const db = readDb();
@@ -581,7 +797,7 @@ app.patch('/api/auth/me', requireAuth, (req, res) => {
     }
 
     user.name = name;
-    user.about = about.slice(0, 120);
+    user.about = about;
 
     writeDb(db);
 
@@ -590,6 +806,60 @@ app.patch('/api/auth/me', requireAuth, (req, res) => {
     return res.json({ user: sanitizeUser(user) });
   } catch (error) {
     return res.status(500).json({ message: asErrorMessage(error) });
+  }
+});
+
+app.patch('/api/auth/me/avatar', requireAuth, upload.single('avatar'), (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ message: 'Avatar image is required.' });
+    }
+
+    if (!String(file.mimetype ?? '').toLowerCase().startsWith('image/')) {
+      removeUploadFileIfExists(`/uploads/${file.filename}`);
+      return res.status(400).json({ message: 'Avatar must be an image file.' });
+    }
+
+    const db = readDb();
+    const user = findUser(db, req.userId);
+    if (!user) {
+      removeUploadFileIfExists(`/uploads/${file.filename}`);
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    if (user.avatarUrl) {
+      removeUploadFileIfExists(user.avatarUrl);
+    }
+
+    user.avatarUrl = `/uploads/${file.filename}`;
+    writeDb(db);
+
+    io.to(`user:${user.id}`).emit('profile:updated', { user: sanitizeUser(user) });
+    return res.json({ user: sanitizeUser(user) });
+  } catch (error) {
+    return res.status(400).json({ message: asErrorMessage(error) });
+  }
+});
+
+app.delete('/api/auth/me/avatar', requireAuth, (req, res) => {
+  try {
+    const db = readDb();
+    const user = findUser(db, req.userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    if (user.avatarUrl) {
+      removeUploadFileIfExists(user.avatarUrl);
+    }
+    user.avatarUrl = null;
+    writeDb(db);
+
+    io.to(`user:${user.id}`).emit('profile:updated', { user: sanitizeUser(user) });
+    return res.json({ user: sanitizeUser(user) });
+  } catch (error) {
+    return res.status(400).json({ message: asErrorMessage(error) });
   }
 });
 
@@ -763,6 +1033,7 @@ app.post('/api/chats/group', requireAuth, (req, res) => {
       updatedAt: now,
       lastMessageAt: now,
       avatarColor: colorFromSeed(name + req.userId),
+      avatarUrl: null,
     };
 
     db.chats.push(chat);
@@ -885,7 +1156,7 @@ app.get('/api/chats/:chatId/pins', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/chats/:chatId/messages', requireAuth, upload.array('files', 5), (req, res) => {
+app.post('/api/chats/:chatId/messages', requireAuth, messageLimiter, upload.array('files', 5), (req, res) => {
   try {
     const db = readDb();
     const chat = findChat(db, req.params.chatId);
@@ -898,10 +1169,10 @@ app.post('/api/chats/:chatId/messages', requireAuth, upload.array('files', 5), (
       return res.status(403).json({ message: 'Access denied.' });
     }
 
-    const text = String(req.body?.text ?? '');
+    const text = normalizeMessage(req.body?.text);
     const replyTo = String(req.body?.replyTo ?? '').trim() || null;
     const encrypted = String(req.body?.encrypted ?? '').toLowerCase() === 'true';
-    const iv = String(req.body?.iv ?? '').trim();
+    const iv = normalizeText(req.body?.iv, 200);
     if (encrypted && !iv) {
       return res.status(400).json({ message: 'Missing encryption IV.' });
     }
@@ -953,9 +1224,9 @@ app.patch('/api/messages/:messageId', requireAuth, (req, res) => {
       return res.status(403).json({ message: 'Access denied.' });
     }
 
-    const text = String(req.body?.text ?? '').trim();
+    const text = normalizeMessage(req.body?.text);
     const encrypted = String(req.body?.encrypted ?? '').toLowerCase() === 'true';
-    const iv = String(req.body?.iv ?? '').trim();
+    const iv = normalizeText(req.body?.iv, 200);
     if (encrypted && !iv) {
       return res.status(400).json({ message: 'Missing encryption IV.' });
     }
@@ -1163,6 +1434,18 @@ app.post('/api/chats/:chatId/read', requireAuth, (req, res) => {
   } catch (error) {
     return res.status(400).json({ message: asErrorMessage(error) });
   }
+});
+
+app.use((error, _req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    return res.status(400).json({ message: error.message });
+  }
+
+  if (error instanceof Error && error.message === 'Unsupported file type.') {
+    return res.status(400).json({ message: error.message });
+  }
+
+  return next(error);
 });
 
 const onlineUsers = new Map();
