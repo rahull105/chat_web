@@ -213,6 +213,7 @@ export function ChatScreen() {
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const callSessionRef = useRef<CallSession | null>(null);
   const activeChatIdRef = useRef<string | null>(null);
+  const pendingCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
 
   const activeChat = useMemo(
     () => chats.find((chat) => chat.id === activeChatId) ?? null,
@@ -375,9 +376,27 @@ export function ChatScreen() {
     }
   }, []);
 
+  const flushPendingCandidates = useCallback(async (peer: RTCPeerConnection, callId: string) => {
+    const queued = pendingCandidatesRef.current[callId] ?? [];
+    if (queued.length === 0) {
+      return;
+    }
+
+    for (const candidate of queued) {
+      try {
+        await peer.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch {
+        // Ignore broken candidate packets.
+      }
+    }
+
+    delete pendingCandidatesRef.current[callId];
+  }, []);
+
   const cleanupCallMedia = useCallback(() => {
     peerRef.current?.close();
     peerRef.current = null;
+    pendingCandidatesRef.current = {};
 
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -413,7 +432,15 @@ export function ChatScreen() {
         const [streamFromEvent] = event.streams;
         if (streamFromEvent) {
           setRemoteStream(streamFromEvent);
+          return;
         }
+
+        // Safari can deliver tracks without prebuilt stream objects.
+        setRemoteStream((previous) => {
+          const stream = previous ?? new MediaStream();
+          stream.addTrack(event.track);
+          return stream;
+        });
       };
 
       peer.onicecandidate = (event) => {
@@ -916,6 +943,7 @@ export function ChatScreen() {
 
         if (signal.type === 'offer' && signal.offer) {
           await peer.setRemoteDescription(new RTCSessionDescription(signal.offer));
+          await flushPendingCandidates(peer, callId);
           const answer = await peer.createAnswer();
           await peer.setLocalDescription(answer);
 
@@ -933,10 +961,19 @@ export function ChatScreen() {
 
         if (signal.type === 'answer' && signal.answer) {
           await peer.setRemoteDescription(new RTCSessionDescription(signal.answer));
+          await flushPendingCandidates(peer, callId);
           setCallSession((previous) => (previous ? { ...previous, status: 'active' } : previous));
         }
 
         if (signal.type === 'candidate' && signal.candidate) {
+          if (!peer.remoteDescription) {
+            pendingCandidatesRef.current[callId] = [
+              ...(pendingCandidatesRef.current[callId] ?? []),
+              signal.candidate,
+            ];
+            return;
+          }
+
           await peer.addIceCandidate(new RTCIceCandidate(signal.candidate));
         }
       })();
@@ -991,6 +1028,7 @@ export function ChatScreen() {
     ensurePeerConnection,
     fetchChats,
     fetchPins,
+    flushPendingCandidates,
     markChatAsRead,
     token,
     updateMessageInState,

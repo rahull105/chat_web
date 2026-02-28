@@ -14,7 +14,7 @@ import { Server } from 'socket.io';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = path.resolve(process.env.DATA_DIR ?? path.join(__dirname, 'data'));
 const DB_PATH = path.join(DATA_DIR, 'db.json');
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 const FRONTEND_DIST_DIR = path.join(__dirname, '..', 'dist');

@@ -11,3 +11,5 @@ services:
         generateValue: true
       - key: CLIENT_ORIGIN
         value: "*"
+      - key: DATA_DIR
+        value: /data

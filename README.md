@@ -75,6 +75,7 @@ Or create a Web Service manually:
   - `NODE_ENV=production`
   - `JWT_SECRET=<strong-random-secret>`
   - `CLIENT_ORIGIN=*`
+  - `DATA_DIR=/path/to/persistent-volume`
 
 ## Notes
 
@@ -82,3 +83,4 @@ Or create a Web Service manually:
 - App data is persisted in `server/data/db.json`.
 - Change `JWT_SECRET` before production deployment.
 - `server/data` and `server/uploads` are file-based. On most cloud platforms, this storage is ephemeral unless you attach a persistent disk or migrate to a database/object storage.
+- Set `DATA_DIR` to your mounted persistent disk path (for example `/data`) to keep accounts/messages across redeploys.
