@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Mail, Lock, User as UserIcon, MessageCircleMore } from 'lucide-react';
+import { Mail, Lock, User as UserIcon, MessageCircleMore, Shield, Sparkles } from 'lucide-react';
 
 import { useAuth } from '../context/useAuth';
 
@@ -32,6 +32,21 @@ export function AuthScreen() {
 
   return (
     <main className="auth-layout">
+      <section className="auth-visual" aria-hidden="true">
+        <span className="auth-orb orb-one" />
+        <span className="auth-orb orb-two" />
+        <span className="auth-orb orb-three" />
+        <span className="auth-grid-glow" />
+        <div className="auth-widget widget-mail">
+          <Mail size={18} />
+        </div>
+        <div className="auth-widget widget-lock">
+          <Shield size={18} />
+        </div>
+        <div className="auth-widget widget-spark">
+          <Sparkles size={18} />
+        </div>
+      </section>
       <section className="auth-panel">
         <form className="auth-form auth-minimal" onSubmit={handleSubmit}>
           <span className="auth-mark" aria-hidden="true">

@@ -195,9 +195,11 @@ label > span {
 
 .auth-layout {
   min-height: 100vh;
-  padding: 24px;
+  padding: 24px min(4vw, 42px);
   display: grid;
-  place-items: center;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 420px);
+  gap: min(5vw, 60px);
+  align-items: center;
 }
 
 .auth-hero,
@@ -206,20 +208,113 @@ label > span {
   display: none;
 }
 
+.auth-visual {
+  position: relative;
+  min-height: min(62vh, 560px);
+  border-radius: 32px;
+  border: 1px solid rgba(175, 191, 213, 0.45);
+  background:
+    radial-gradient(circle at 22% 20%, rgba(15, 110, 252, 0.22), transparent 42%),
+    radial-gradient(circle at 80% 82%, rgba(245, 159, 11, 0.2), transparent 38%),
+    linear-gradient(170deg, rgba(255, 255, 255, 0.82), rgba(242, 246, 250, 0.7));
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.auth-grid-glow {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(103, 128, 162, 0.16) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(103, 128, 162, 0.16) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: radial-gradient(circle at center, black 40%, transparent 78%);
+  animation: drift 18s linear infinite;
+}
+
+.auth-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(2px);
+  opacity: 0.86;
+}
+
+.orb-one {
+  width: 220px;
+  height: 220px;
+  top: 12%;
+  left: 10%;
+  background: radial-gradient(circle, rgba(15, 110, 252, 0.4), rgba(15, 110, 252, 0.05));
+  animation: float-soft 9s ease-in-out infinite;
+}
+
+.orb-two {
+  width: 160px;
+  height: 160px;
+  right: 12%;
+  top: 24%;
+  background: radial-gradient(circle, rgba(245, 159, 11, 0.44), rgba(245, 159, 11, 0.07));
+  animation: float-soft 8.5s ease-in-out infinite reverse;
+}
+
+.orb-three {
+  width: 190px;
+  height: 190px;
+  right: 26%;
+  bottom: 8%;
+  background: radial-gradient(circle, rgba(15, 110, 252, 0.33), rgba(15, 110, 252, 0.06));
+  animation: float-soft 10s ease-in-out infinite;
+}
+
+.auth-widget {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  border: 1px solid rgba(176, 193, 215, 0.55);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.74);
+  color: #214368;
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-sm);
+}
+
+.widget-mail {
+  left: 22%;
+  bottom: 18%;
+  animation: float-chip 6.2s ease-in-out infinite;
+}
+
+.widget-lock {
+  right: 16%;
+  top: 16%;
+  animation: float-chip 7.4s ease-in-out infinite reverse;
+}
+
+.widget-spark {
+  right: 28%;
+  bottom: 26%;
+  animation: float-chip 6.8s ease-in-out infinite;
+}
+
 .auth-panel {
   width: min(100%, 420px);
 }
 
 .auth-form {
   width: 100%;
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(12px);
   border: 1px solid rgba(219, 225, 232, 0.85);
-  border-radius: 24px;
+  border-radius: 28px;
   box-shadow: var(--shadow-lg);
-  padding: 24px;
+  padding: 26px;
   display: grid;
-  gap: 12px;
+  gap: 13px;
+  position: relative;
+  animation: form-in 0.45s ease;
 }
 
 .auth-form.auth-minimal {
@@ -227,15 +322,17 @@ label > span {
 }
 
 .auth-mark {
-  width: 46px;
-  height: 46px;
+  width: 50px;
+  height: 50px;
   margin: 0 auto 2px;
-  border-radius: 13px;
+  border-radius: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: #fff;
-  background: linear-gradient(135deg, var(--brand), var(--brand-strong));
+  background: linear-gradient(135deg, #0f6efc, #0b55ca);
+  box-shadow: 0 8px 20px rgba(15, 110, 252, 0.34);
+  animation: float-soft 5s ease-in-out infinite;
 }
 
 .auth-mode-toggle {
@@ -293,7 +390,7 @@ label > span {
 }
 
 .compact-field {
-  height: 46px;
+  height: 48px;
 }
 
 .error-text {
@@ -304,14 +401,15 @@ label > span {
 }
 
 .auth-submit {
-  width: 56px;
-  height: 56px;
+  width: 58px;
+  height: 58px;
   border-radius: 50%;
   padding: 0;
   justify-self: center;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 10px 22px rgba(15, 110, 252, 0.28);
 }
 
 .btn-loader {
@@ -459,10 +557,12 @@ label > span {
   gap: 10px;
   align-items: flex-start;
   text-align: left;
+  transition: transform 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
 }
 
 .chat-item:hover {
   background: var(--bg-subtle);
+  transform: translateX(2px);
 }
 
 .chat-item.active {
@@ -719,6 +819,7 @@ label > span {
 
 .message-row {
   display: flex;
+  animation: message-in 0.22s ease;
 }
 
 .message-row.mine {
@@ -1090,17 +1191,6 @@ label > span {
   color: var(--ink-soft);
 }
 
-.status-viewer p {
-  margin: 0;
-}
-
-.status-media img,
-.status-media video {
-  width: 100%;
-  border-radius: 12px;
-  display: block;
-}
-
 .call-toast {
   position: fixed;
   left: 50%;
@@ -1179,11 +1269,56 @@ label > span {
 .local-video {
   position: absolute;
   width: 160px;
+  height: 110px;
   right: 10px;
   bottom: 10px;
   border-radius: 10px;
   border: 2px solid rgba(255, 255, 255, 0.35);
   background: rgba(0, 0, 0, 0.25);
+  object-fit: cover;
+  z-index: 2;
+}
+
+.local-video-placeholder {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 160px;
+  height: 110px;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(7, 12, 19, 0.75);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(230, 239, 249, 0.82);
+  z-index: 3;
+}
+
+.remote-audio {
+  width: 0;
+  height: 0;
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.call-controls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.call-controls .icon-btn {
+  color: #f3f7fb;
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.call-controls .icon-btn.active-control {
+  background: rgba(245, 159, 11, 0.25);
+  border-color: rgba(245, 159, 11, 0.5);
 }
 
 .audio-call-badge {
@@ -1212,6 +1347,62 @@ label > span {
   }
 }
 
+@keyframes form-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes float-soft {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-14px);
+  }
+}
+
+@keyframes float-chip {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    transform: translateY(-10px) scale(1.03);
+  }
+}
+
+@keyframes drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    transform: translate3d(34px, 34px, 0);
+  }
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes slideUp {
   from {
     transform: translateY(14px);
@@ -1227,6 +1418,13 @@ label > span {
 @media (max-width: 1100px) {
   .auth-layout {
     padding: 16px;
+    grid-template-columns: minmax(0, 520px);
+    justify-content: center;
+    gap: 16px;
+  }
+
+  .auth-visual {
+    min-height: 240px;
   }
 
   .chat-layout {
@@ -1244,6 +1442,20 @@ label > span {
     grid-template-columns: 1fr;
     padding: 0;
     gap: 0;
+  }
+
+  .auth-layout {
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding: 0;
+  }
+
+  .auth-visual {
+    display: none;
+  }
+
+  .auth-panel {
+    width: 100%;
   }
 
   .sidebar,

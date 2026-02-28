@@ -19,6 +19,7 @@ import {
   KeyRound,
   LogOut,
   Mic,
+  MicOff,
   Paperclip,
   Phone,
   Pin,
@@ -29,6 +30,9 @@ import {
   Trash2,
   Users,
   Video,
+  VideoOff,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react';
 
@@ -36,7 +40,7 @@ import { useAuth } from '../context/useAuth';
 import { decryptText, encryptText } from '../lib/crypto';
 import { api } from '../lib/api';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
-import type { Chat, Message, StatusItem, User } from '../types';
+import type { Chat, Message, User } from '../types';
 
 const REACTION_CHOICES = ['??', '??', '??', '??', '??', '??'];
 const ENCRYPTED_PLACEHOLDER = '__encrypted__';
@@ -182,7 +186,6 @@ export function ChatScreen() {
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
 
   const [profileName, setProfileName] = useState('');
-  const [profileAbout, setProfileAbout] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
 
   const [chatKeys, setChatKeys] = useState<Record<string, string>>({});
@@ -191,16 +194,13 @@ export function ChatScreen() {
   const [pinsByChat, setPinsByChat] = useState<Record<string, Message[]>>({});
   const [showPinned, setShowPinned] = useState(true);
 
-  const [statuses, setStatuses] = useState<StatusItem[]>([]);
-  const [showStatusComposer, setShowStatusComposer] = useState(false);
-  const [statusText, setStatusText] = useState('');
-  const [statusFile, setStatusFile] = useState<File | null>(null);
-  const [viewingStatus, setViewingStatus] = useState<StatusItem | null>(null);
-
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const [callSession, setCallSession] = useState<CallSession | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [micMuted, setMicMuted] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
+  const [speakerMuted, setSpeakerMuted] = useState(false);
 
   const [errorText, setErrorText] = useState<string | null>(null);
 
@@ -259,18 +259,6 @@ export function ChatScreen() {
   const activeKey = activeChatId ? chatKeys[activeChatId] ?? '' : '';
   const activePins = activeChatId ? pinsByChat[activeChatId] ?? [] : [];
 
-  const statusCards = useMemo(() => {
-    const byUser = new Map<string, StatusItem>();
-    statuses.forEach((status) => {
-      const existing = byUser.get(status.userId);
-      if (!existing || +new Date(status.createdAt) > +new Date(existing.createdAt)) {
-        byUser.set(status.userId, status);
-      }
-    });
-
-    return [...byUser.values()].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  }, [statuses]);
-
   const isPeerOnline = useMemo(() => {
     if (!activeChat || !activeChat.directPeer) {
       return false;
@@ -306,11 +294,6 @@ export function ChatScreen() {
   const fetchDirectory = useCallback(async () => {
     const { data } = await api.get<{ users: User[] }>('/users/search');
     setDirectoryUsers(data.users);
-  }, []);
-
-  const fetchStatuses = useCallback(async () => {
-    const { data } = await api.get<{ statuses: StatusItem[] }>('/statuses');
-    setStatuses(data.statuses);
   }, []);
 
   const fetchPins = useCallback(async (chatId: string) => {
@@ -405,6 +388,9 @@ export function ChatScreen() {
 
     setLocalStream(null);
     setRemoteStream(null);
+    setMicMuted(false);
+    setCameraOff(false);
+    setSpeakerMuted(false);
   }, []);
 
   const endCallLocally = useCallback(() => {
@@ -458,10 +444,26 @@ export function ChatScreen() {
         });
       };
 
+      peer.onconnectionstatechange = () => {
+        if (peer.connectionState === 'connected') {
+          setCallSession((previous) => (previous ? { ...previous, status: 'active' } : previous));
+          return;
+        }
+
+        if (peer.connectionState === 'failed' || peer.connectionState === 'disconnected') {
+          const activeCall = callSessionRef.current;
+          if (!activeCall || activeCall.callId !== callId) {
+            return;
+          }
+          endCallLocally();
+          setErrorText('Call connection lost.');
+        }
+      };
+
       peerRef.current = peer;
       return peer;
     },
-    [],
+    [endCallLocally],
   );
 
   const getDisplayText = useCallback(
@@ -494,7 +496,6 @@ export function ChatScreen() {
     }
 
     setProfileName(user.name);
-    setProfileAbout(user.about);
   }, [user]);
 
   useEffect(() => {
@@ -505,7 +506,7 @@ export function ChatScreen() {
       setErrorText(null);
 
       try {
-        await Promise.all([fetchChats(), fetchDirectory(), fetchStatuses()]);
+        await Promise.all([fetchChats(), fetchDirectory()]);
       } catch (error) {
         if (mounted) {
           setErrorText(apiErrorMessage(error));
@@ -522,7 +523,7 @@ export function ChatScreen() {
     return () => {
       mounted = false;
     };
-  }, [fetchChats, fetchDirectory, fetchStatuses]);
+  }, [fetchChats, fetchDirectory]);
 
   useEffect(() => {
     if (!activeChatId) {
@@ -632,6 +633,19 @@ export function ChatScreen() {
   }, [callSession, localStream]);
 
   useEffect(() => {
+    if (!localStream) {
+      return;
+    }
+
+    localStream.getAudioTracks().forEach((track) => {
+      track.enabled = !micMuted;
+    });
+    localStream.getVideoTracks().forEach((track) => {
+      track.enabled = !cameraOff;
+    });
+  }, [cameraOff, localStream, micMuted]);
+
+  useEffect(() => {
     if (callSession?.type === 'video' && remoteVideoRef.current) {
       if (!remoteStream) {
         remoteVideoRef.current.srcObject = null;
@@ -643,21 +657,23 @@ export function ChatScreen() {
       }
     }
 
-    if (callSession?.type === 'audio' && remoteAudioRef.current) {
+    if (remoteAudioRef.current) {
       if (!remoteStream) {
         remoteAudioRef.current.srcObject = null;
       } else {
         remoteAudioRef.current.srcObject = remoteStream;
+        remoteAudioRef.current.muted = speakerMuted;
+        remoteAudioRef.current.volume = 1;
         void remoteAudioRef.current.play().catch(() => {
           // Autoplay can fail silently on some browsers until user gesture.
         });
       }
     }
 
-    if (callSession?.type === 'video' && remoteAudioRef.current) {
-      remoteAudioRef.current.srcObject = null;
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.muted = true;
     }
-  }, [callSession, remoteStream]);
+  }, [callSession, remoteStream, speakerMuted]);
 
   useEffect(() => {
     callSessionRef.current = callSession;
@@ -680,13 +696,6 @@ export function ChatScreen() {
 
     const handleChatList = () => {
       void fetchChats();
-    };
-
-    const handleStatusNew = ({ status }: { status: StatusItem }) => {
-      setStatuses((previous) => {
-        const next = [status, ...previous.filter((entry) => entry.id !== status.id)];
-        return next.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-      });
     };
 
     const handleMessageNew = ({ chatId, message }: { chatId: string; message: Message }) => {
@@ -992,7 +1001,6 @@ export function ChatScreen() {
     socket.on('presence:update', handlePresence);
     socket.on('chat:list:update', handleChatList);
     socket.on('chat:updated', handleChatList);
-    socket.on('status:new', handleStatusNew);
     socket.on('message:new', handleMessageNew);
     socket.on('message:updated', handleMessageUpdated);
     socket.on('message:deleted', handleMessageDeleted);
@@ -1009,7 +1017,6 @@ export function ChatScreen() {
       socket.off('presence:update', handlePresence);
       socket.off('chat:list:update', handleChatList);
       socket.off('chat:updated', handleChatList);
-      socket.off('status:new', handleStatusNew);
       socket.off('message:new', handleMessageNew);
       socket.off('message:updated', handleMessageUpdated);
       socket.off('message:deleted', handleMessageDeleted);
@@ -1188,7 +1195,7 @@ export function ChatScreen() {
     setErrorText(null);
 
     try {
-      await updateProfile(profileName, profileAbout);
+      await updateProfile(profileName, user?.about ?? '');
     } catch (error) {
       setErrorText(apiErrorMessage(error));
     } finally {
@@ -1211,44 +1218,6 @@ export function ChatScreen() {
       });
     } catch (error) {
       setErrorText(apiErrorMessage(error));
-    }
-  }
-
-  async function createStatus() {
-    if (!statusText.trim() && !statusFile) {
-      setErrorText('Status requires text or media.');
-      return;
-    }
-
-    try {
-      const payload = new FormData();
-      payload.append('text', statusText);
-      if (statusFile) {
-        payload.append('file', statusFile);
-      }
-
-      await api.post('/statuses', payload, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      setShowStatusComposer(false);
-      setStatusText('');
-      setStatusFile(null);
-      await fetchStatuses();
-    } catch (error) {
-      setErrorText(apiErrorMessage(error));
-    }
-  }
-
-  async function openStatus(status: StatusItem) {
-    setViewingStatus(status);
-
-    try {
-      await api.post(`/statuses/${status.id}/view`);
-    } catch {
-      // Best effort.
     }
   }
 
@@ -1291,10 +1260,30 @@ export function ChatScreen() {
     }
 
     try {
+      setErrorText(null);
+      setMicMuted(false);
+      setCameraOff(false);
+      setSpeakerMuted(false);
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: type === 'video',
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video:
+          type === 'video'
+            ? {
+                facingMode: 'user',
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              }
+            : false,
       });
+
+      if (type === 'video' && stream.getVideoTracks().length === 0) {
+        setCameraOff(true);
+      }
 
       localStreamRef.current = stream;
       setLocalStream(stream);
@@ -1316,6 +1305,48 @@ export function ChatScreen() {
         });
       });
     } catch {
+      if (type === 'video') {
+        try {
+          const fallback = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+            video: false,
+          });
+          localStreamRef.current = fallback;
+          setLocalStream(fallback);
+          setCameraOff(true);
+          setErrorText('Camera unavailable. Starting call with audio only.');
+
+          getSocket()?.emit(
+            'call:start',
+            { chatId: activeChatId, type },
+            (response: { ok: boolean; callId?: string; message?: string }) => {
+              if (!response.ok || !response.callId) {
+                cleanupCallMedia();
+                setErrorText(response.message ?? 'Unable to start call.');
+                return;
+              }
+
+              setCallSession({
+                callId: response.callId,
+                chatId: activeChatId,
+                type,
+                peerId: activeChat.directPeer!.id,
+                peerName: activeChat.directPeer!.name,
+                status: 'outgoing',
+              });
+            },
+          );
+          return;
+        } catch {
+          setErrorText('Microphone/camera permission denied.');
+          return;
+        }
+      }
+
       setErrorText('Microphone/camera permission denied.');
     }
   }
@@ -1326,10 +1357,30 @@ export function ChatScreen() {
     }
 
     try {
+      setErrorText(null);
+      setMicMuted(false);
+      setCameraOff(false);
+      setSpeakerMuted(false);
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: incomingCall.type === 'video',
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video:
+          incomingCall.type === 'video'
+            ? {
+                facingMode: 'user',
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              }
+            : false,
       });
+
+      if (incomingCall.type === 'video' && stream.getVideoTracks().length === 0) {
+        setCameraOff(true);
+      }
 
       localStreamRef.current = stream;
       setLocalStream(stream);
@@ -1349,6 +1400,42 @@ export function ChatScreen() {
       });
       setIncomingCall(null);
     } catch {
+      if (incomingCall.type === 'video') {
+        try {
+          const fallback = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+            video: false,
+          });
+          localStreamRef.current = fallback;
+          setLocalStream(fallback);
+          setCameraOff(true);
+          setErrorText('Camera unavailable. Joined call with audio only.');
+
+          getSocket()?.emit('call:answer', {
+            callId: incomingCall.callId,
+            accepted: true,
+          });
+
+          setCallSession({
+            callId: incomingCall.callId,
+            chatId: incomingCall.chatId,
+            type: incomingCall.type,
+            peerId: incomingCall.callerId,
+            peerName: incomingCall.callerName,
+            status: 'incoming',
+          });
+          setIncomingCall(null);
+          return;
+        } catch {
+          setErrorText('Unable to access media devices.');
+          return;
+        }
+      }
+
       setErrorText('Unable to access media devices.');
     }
   }
@@ -1370,6 +1457,21 @@ export function ChatScreen() {
       getSocket()?.emit('call:end', { callId: callSession.callId });
     }
     endCallLocally();
+  }
+
+  function toggleMute() {
+    setMicMuted((previous) => !previous);
+  }
+
+  function toggleCamera() {
+    if (callSession?.type !== 'video') {
+      return;
+    }
+    setCameraOff((previous) => !previous);
+  }
+
+  function toggleSpeaker() {
+    setSpeakerMuted((previous) => !previous);
   }
 
   async function editMessage(message: Message) {
@@ -1445,9 +1547,6 @@ export function ChatScreen() {
           </div>
 
           <div className="header-actions">
-            <button className="icon-btn" type="button" onClick={() => setShowStatusComposer(true)}>
-              <ImageIcon size={18} />
-            </button>
             <button className="icon-btn" type="button" onClick={() => setShowGroupModal(true)}>
               <Users size={19} />
             </button>
@@ -1537,31 +1636,6 @@ export function ChatScreen() {
           })}
         </section>
 
-        <section className="status-strip">
-          <button className="status-create" type="button" onClick={() => setShowStatusComposer(true)}>
-            <CirclePlus size={16} />
-            Add status
-          </button>
-          <div className="status-list">
-            {statusCards.length === 0 ? <span className="muted-inline">No status updates</span> : null}
-            {statusCards.map((status) => (
-              <button
-                key={status.id}
-                className={clsx('status-chip', status.seen && 'seen')}
-                type="button"
-                onClick={() => void openStatus(status)}
-              >
-                <Avatar
-                  label={status.user?.name ?? 'User'}
-                  color={status.user?.avatarColor ?? '#3557e0'}
-                  size={30}
-                />
-                <span>{status.user?.name ?? 'Unknown'}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
         <section className="profile-panel compact">
           <label>
             <span>Name</span>
@@ -1569,14 +1643,6 @@ export function ChatScreen() {
               value={profileName}
               onChange={(event) => setProfileName(event.target.value)}
               maxLength={30}
-            />
-          </label>
-          <label>
-            <span>About</span>
-            <input
-              value={profileAbout}
-              onChange={(event) => setProfileAbout(event.target.value)}
-              maxLength={120}
             />
           </label>
           <div className="profile-actions">
@@ -1900,67 +1966,6 @@ export function ChatScreen() {
         </section>
       ) : null}
 
-      {showStatusComposer ? (
-        <section className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="modal-card">
-            <header>
-              <h3>Create status</h3>
-              <button className="icon-btn" type="button" onClick={() => setShowStatusComposer(false)}>
-                <X size={16} />
-              </button>
-            </header>
-
-            <label>
-              <span>Text</span>
-              <input
-                value={statusText}
-                onChange={(event) => setStatusText(event.target.value)}
-                maxLength={220}
-                placeholder="What is new today?"
-              />
-            </label>
-
-            <label>
-              <span>Image/Video</span>
-              <input
-                type="file"
-                accept="image/*,video/*"
-                onChange={(event) => setStatusFile(event.target.files?.[0] ?? null)}
-              />
-            </label>
-
-            <button className="primary-btn" type="button" onClick={() => void createStatus()}>
-              Post status
-            </button>
-          </div>
-        </section>
-      ) : null}
-
-      {viewingStatus ? (
-        <section className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="modal-card status-viewer">
-            <header>
-              <h3>{viewingStatus.user?.name ?? 'Status'}</h3>
-              <button className="icon-btn" type="button" onClick={() => setViewingStatus(null)}>
-                <X size={16} />
-              </button>
-            </header>
-
-            <p>{viewingStatus.text}</p>
-            {viewingStatus.attachment ? (
-              <div className="status-media">
-                {viewingStatus.attachment.mimeType.startsWith('video/') ? (
-                  <video controls src={viewingStatus.attachment.url} />
-                ) : (
-                  <img src={viewingStatus.attachment.url} alt={viewingStatus.attachment.name} />
-                )}
-              </div>
-            ) : null}
-            <small>{formatChatTime(viewingStatus.createdAt)}</small>
-          </div>
-        </section>
-      ) : null}
-
       {incomingCall ? (
         <section className="call-toast">
           <div>
@@ -1995,18 +2000,52 @@ export function ChatScreen() {
             </header>
 
             <div className="call-media">
+              <audio ref={remoteAudioRef} autoPlay playsInline className="remote-audio" />
               {callSession.type === 'video' ? (
                 <>
-                  <video ref={remoteVideoRef} autoPlay playsInline className="remote-video" />
+                  <video ref={remoteVideoRef} autoPlay playsInline muted className="remote-video" />
                   <video ref={localVideoRef} autoPlay muted playsInline className="local-video" />
+                  {cameraOff || (localStream?.getVideoTracks().length ?? 0) === 0 ? (
+                    <div className="local-video-placeholder">
+                      <VideoOff size={16} />
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <div className="audio-call-badge">
-                  <audio ref={remoteAudioRef} autoPlay playsInline />
                   <Mic size={32} />
                   <p>Audio call active</p>
                 </div>
               )}
+            </div>
+
+            <div className="call-controls">
+              <button
+                className={clsx('icon-btn', micMuted && 'active-control')}
+                type="button"
+                onClick={toggleMute}
+                title={micMuted ? 'Unmute microphone' : 'Mute microphone'}
+              >
+                {micMuted ? <MicOff size={16} /> : <Mic size={16} />}
+              </button>
+              {callSession.type === 'video' ? (
+                <button
+                  className={clsx('icon-btn', cameraOff && 'active-control')}
+                  type="button"
+                  onClick={toggleCamera}
+                  title={cameraOff ? 'Turn on camera' : 'Turn off camera'}
+                >
+                  {cameraOff ? <VideoOff size={16} /> : <Video size={16} />}
+                </button>
+              ) : null}
+              <button
+                className={clsx('icon-btn', speakerMuted && 'active-control')}
+                type="button"
+                onClick={toggleSpeaker}
+                title={speakerMuted ? 'Unmute speaker' : 'Mute speaker'}
+              >
+                {speakerMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+              </button>
             </div>
 
             <button className="danger-btn" type="button" onClick={endCall}>
