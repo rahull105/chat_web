@@ -57,8 +57,28 @@ npm run dev
 - `npm run build` - build frontend app
 - `npm run start` - run backend in production mode
 
+## Deploy (Render)
+
+This project is configured for a single-service Render deployment:
+
+1. Push this repo to GitHub.
+2. In Render, choose `New +` -> `Blueprint`.
+3. Select this repository.
+4. Render will detect [`render.yaml`](./render.yaml) and create the service.
+5. Deploy.
+
+Or create a Web Service manually:
+
+- Build command: `npm install && npm run build`
+- Start command: `npm run start`
+- Env vars:
+  - `NODE_ENV=production`
+  - `JWT_SECRET=<strong-random-secret>`
+  - `CLIENT_ORIGIN=*`
+
 ## Notes
 
 - Uploaded files are served from `server/uploads`.
 - App data is persisted in `server/data/db.json`.
 - Change `JWT_SECRET` before production deployment.
+- `server/data` and `server/uploads` are file-based. On most cloud platforms, this storage is ephemeral unless you attach a persistent disk or migrate to a database/object storage.

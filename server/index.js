@@ -17,10 +17,15 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, 'data');
 const DB_PATH = path.join(DATA_DIR, 'db.json');
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
+const FRONTEND_DIST_DIR = path.join(__dirname, '..', 'dist');
 
 const PORT = Number(process.env.PORT ?? 3001);
 const JWT_SECRET = process.env.JWT_SECRET ?? 'change-me-in-production';
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? '*';
+const ORIGIN_ALLOWLIST = CLIENT_ORIGIN.split(',')
+  .map((entry) => entry.trim())
+  .filter(Boolean);
+const ALLOW_ALL_ORIGINS = ORIGIN_ALLOWLIST.includes('*');
 
 const DEFAULT_DB = {
   users: [],
@@ -296,19 +301,43 @@ function shapeStatus(db, status, viewerId) {
   };
 }
 
+function isOriginAllowed(origin) {
+  if (!origin) {
+    return true;
+  }
+
+  if (ALLOW_ALL_ORIGINS) {
+    return true;
+  }
+
+  return ORIGIN_ALLOWLIST.includes(origin);
+}
+
 ensureStorage();
 
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: CLIENT_ORIGIN,
+    origin: (origin, callback) => {
+      if (isOriginAllowed(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error('Origin not allowed by CORS'));
+    },
   },
 });
 
 app.use(
   cors({
-    origin: CLIENT_ORIGIN,
+    origin: (origin, callback) => {
+      if (isOriginAllowed(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error('Origin not allowed by CORS'));
+    },
     credentials: true,
   }),
 );
@@ -1442,6 +1471,15 @@ io.on('connection', (socket) => {
   });
 });
 
+if (fs.existsSync(FRONTEND_DIST_DIR)) {
+  app.use(express.static(FRONTEND_DIST_DIR));
+
+  // Serve the SPA shell for non-API routes.
+  app.get(/^\/(?!api|uploads|socket\.io).*/, (_req, res) => {
+    res.sendFile(path.join(FRONTEND_DIST_DIR, 'index.html'));
+  });
+}
+
 httpServer.listen(PORT, () => {
-  console.log(`Chat server running on http://localhost:${PORT}`);
+  console.log(`Chat server running on port ${PORT}`);
 });
