@@ -1,0 +1,46 @@
+{
+  "users": [
+    {
+      "id": "9358ab64-18bb-4a20-a2b0-45160415be1a",
+      "name": "rahul",
+      "email": "katarurahul105@gmail.com",
+      "passwordHash": "$2b$10$FdDqlbRBm4AMAOADMy76iOmhN9uxWiMISu.mC5mPxV4AAMjCET/he",
+      "about": "Hey there! I am using ChatWave.",
+      "avatarColor": "#5c6bc0",
+      "createdAt": "2026-02-28T09:00:53.812Z",
+      "lastSeen": "2026-02-28T09:01:08.901Z"
+    },
+    {
+      "id": "46ff9021-b0f3-4b1d-8962-47ca0ebed9aa",
+      "name": "ram",
+      "email": "ram@gmail.com",
+      "passwordHash": "$2b$10$6fEr.DEKVdq8EHUKwP1eeeLMpvufAkQFvwqHIn/Kcs8Iufig6xcze",
+      "about": "Hey there! I am using ChatWave.",
+      "avatarColor": "#db4437",
+      "createdAt": "2026-02-28T09:01:34.587Z",
+      "lastSeen": "2026-02-28T09:01:34.813Z"
+    }
+  ],
+  "chats": [
+    {
+      "id": "8d5e2e9c-6176-4bca-b6ed-a70fe2154ab5",
+      "type": "direct",
+      "name": null,
+      "description": "",
+      "members": [
+        "46ff9021-b0f3-4b1d-8962-47ca0ebed9aa",
+        "9358ab64-18bb-4a20-a2b0-45160415be1a"
+      ],
+      "admins": [
+        "46ff9021-b0f3-4b1d-8962-47ca0ebed9aa"
+      ],
+      "createdBy": "46ff9021-b0f3-4b1d-8962-47ca0ebed9aa",
+      "createdAt": "2026-02-28T09:01:59.352Z",
+      "updatedAt": "2026-02-28T09:01:59.352Z",
+      "lastMessageAt": "2026-02-28T09:01:59.352Z",
+      "avatarColor": "#6d4c41"
+    }
+  ],
+  "messages": [],
+  "statuses": []
+}
