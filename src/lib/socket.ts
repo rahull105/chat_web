@@ -7,8 +7,11 @@ export function connectSocket(token: string) {
     return socket;
   }
 
-  socket = io(import.meta.env.VITE_SOCKET_URL ?? 'http://localhost:3001', {
+  const socketUrl = import.meta.env.VITE_SOCKET_URL || undefined;
+
+  socket = io(socketUrl, {
     auth: { token },
+    path: '/socket.io',
     transports: ['websocket', 'polling'],
   });
 
