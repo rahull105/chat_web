@@ -32,89 +32,88 @@ export function AuthScreen() {
 
   return (
     <main className="auth-layout">
-      <section className="auth-hero">
-        <span className="badge">Real-time messaging</span>
-        <h1>ChatWave</h1>
-        <p>
-          A WhatsApp-inspired chat experience with private messages, group conversations, read receipts,
-          media sharing, typing status, and online presence.
-        </p>
-        <div className="auth-hero-card">
-          <MessageCircleMore size={28} />
-          <div>
-            <h2>Stay connected</h2>
-            <p>Fast, responsive and fully functional on desktop and mobile.</p>
-          </div>
-        </div>
-      </section>
-
       <section className="auth-panel">
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <h2>{mode === 'login' ? 'Welcome back' : 'Create account'}</h2>
-          <p>Use your email to access the chat platform.</p>
-
+        <form className="auth-form auth-minimal" onSubmit={handleSubmit}>
+          <span className="auth-mark" aria-hidden="true">
+            <MessageCircleMore size={20} />
+          </span>
+          <div className="auth-mode-toggle" role="tablist" aria-label="Authentication mode">
+            <button
+              className={`mode-btn ${mode === 'login' ? 'active' : ''}`}
+              type="button"
+              aria-label="Login mode"
+              aria-selected={mode === 'login'}
+              onClick={() => {
+                setMode('login');
+                setError(null);
+              }}
+            >
+              <Lock size={15} />
+            </button>
+            <button
+              className={`mode-btn ${mode === 'signup' ? 'active' : ''}`}
+              type="button"
+              aria-label="Register mode"
+              aria-selected={mode === 'signup'}
+              onClick={() => {
+                setMode('signup');
+                setError(null);
+              }}
+            >
+              <UserIcon size={15} />
+            </button>
+          </div>
           {mode === 'signup' ? (
-            <label>
-              <span>Full name</span>
-              <div className="field">
-                <UserIcon size={17} />
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  placeholder="Your display name"
-                  required
-                  minLength={2}
-                  maxLength={30}
-                />
-              </div>
-            </label>
+            <div className="field compact-field">
+              <UserIcon size={17} />
+              <input
+                type="text"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                aria-label="Full name"
+                required
+                minLength={2}
+                maxLength={30}
+              />
+            </div>
           ) : null}
-
-          <label>
-            <span>Email</span>
-            <div className="field">
-              <Mail size={17} />
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="name@example.com"
-                required
-              />
-            </div>
-          </label>
-
-          <label>
-            <span>Password</span>
-            <div className="field">
-              <Lock size={17} />
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Minimum 6 characters"
-                required
-                minLength={6}
-              />
-            </div>
-          </label>
+          <div className="field compact-field">
+            <Mail size={17} />
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              aria-label="Email"
+              required
+            />
+          </div>
+          <div className="field compact-field">
+            <Lock size={17} />
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              aria-label="Password"
+              required
+              minLength={6}
+            />
+          </div>
 
           {error ? <p className="error-text">{error}</p> : null}
 
-          <button className="primary-btn" type="submit" disabled={busy}>
-            {busy ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
-          </button>
-
           <button
-            className="ghost-btn"
-            type="button"
-            onClick={() => {
-              setMode((current) => (current === 'login' ? 'signup' : 'login'));
-              setError(null);
-            }}
+            className="primary-btn auth-submit"
+            type="submit"
+            disabled={busy}
+            aria-label={mode === 'login' ? 'Sign in' : 'Create account'}
           >
-            {mode === 'login' ? 'Need an account? Register' : 'Already have an account? Login'}
+            {busy ? (
+              <span className="btn-loader" aria-hidden="true" />
+            ) : mode === 'login' ? (
+              <Lock size={16} />
+            ) : (
+              <UserIcon size={16} />
+            )}
           </button>
         </form>
       </section>

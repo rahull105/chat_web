@@ -1454,59 +1454,6 @@ export function ChatScreen() {
           </div>
         </header>
 
-        <section className="status-strip">
-          <button className="status-create" type="button" onClick={() => setShowStatusComposer(true)}>
-            <CirclePlus size={16} />
-            Add status
-          </button>
-          <div className="status-list">
-            {statusCards.length === 0 ? <span className="muted-inline">No status updates</span> : null}
-            {statusCards.map((status) => (
-              <button
-                key={status.id}
-                className={clsx('status-chip', status.seen && 'seen')}
-                type="button"
-                onClick={() => void openStatus(status)}
-              >
-                <Avatar
-                  label={status.user?.name ?? 'User'}
-                  color={status.user?.avatarColor ?? '#3557e0'}
-                  size={30}
-                />
-                <span>{status.user?.name ?? 'Unknown'}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="profile-panel compact">
-          <label>
-            <span>Name</span>
-            <input
-              value={profileName}
-              onChange={(event) => setProfileName(event.target.value)}
-              maxLength={30}
-            />
-          </label>
-          <label>
-            <span>About</span>
-            <input
-              value={profileAbout}
-              onChange={(event) => setProfileAbout(event.target.value)}
-              maxLength={120}
-            />
-          </label>
-          <div className="profile-actions">
-            <button className="primary-btn" type="button" onClick={saveProfile} disabled={savingProfile}>
-              {savingProfile ? 'Saving...' : 'Save'}
-            </button>
-            <button className="ghost-btn" type="button" onClick={logout}>
-              <LogOut size={15} />
-              Logout
-            </button>
-          </div>
-        </section>
-
         <div className="search-wrap">
           <Search size={16} />
           <input
@@ -1588,6 +1535,59 @@ export function ChatScreen() {
               </button>
             );
           })}
+        </section>
+
+        <section className="status-strip">
+          <button className="status-create" type="button" onClick={() => setShowStatusComposer(true)}>
+            <CirclePlus size={16} />
+            Add status
+          </button>
+          <div className="status-list">
+            {statusCards.length === 0 ? <span className="muted-inline">No status updates</span> : null}
+            {statusCards.map((status) => (
+              <button
+                key={status.id}
+                className={clsx('status-chip', status.seen && 'seen')}
+                type="button"
+                onClick={() => void openStatus(status)}
+              >
+                <Avatar
+                  label={status.user?.name ?? 'User'}
+                  color={status.user?.avatarColor ?? '#3557e0'}
+                  size={30}
+                />
+                <span>{status.user?.name ?? 'Unknown'}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="profile-panel compact">
+          <label>
+            <span>Name</span>
+            <input
+              value={profileName}
+              onChange={(event) => setProfileName(event.target.value)}
+              maxLength={30}
+            />
+          </label>
+          <label>
+            <span>About</span>
+            <input
+              value={profileAbout}
+              onChange={(event) => setProfileAbout(event.target.value)}
+              maxLength={120}
+            />
+          </label>
+          <div className="profile-actions">
+            <button className="primary-btn" type="button" onClick={saveProfile} disabled={savingProfile}>
+              {savingProfile ? 'Saving...' : 'Save'}
+            </button>
+            <button className="ghost-btn" type="button" onClick={logout}>
+              <LogOut size={15} />
+              Logout
+            </button>
+          </div>
         </section>
       </aside>
 
