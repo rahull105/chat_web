@@ -20,15 +20,25 @@ const UPLOAD_DIR = path.join(__dirname, 'uploads');
 const FRONTEND_DIST_DIR = path.join(__dirname, '..', 'dist');
 
 const PORT = Number(process.env.PORT ?? 3001);
-const JWT_SECRET = process.env.JWT_SECRET ?? 'change-me-in-production';
+const NODE_ENV = process.env.NODE_ENV ?? 'development';
+const DEFAULT_JWT_SECRET = 'change-me-in-production';
+const configuredJwtSecret = String(process.env.JWT_SECRET ?? '').trim();
+const missingStrongJwtSecret =
+  !configuredJwtSecret || configuredJwtSecret === DEFAULT_JWT_SECRET;
+const JWT_SECRET =
+  NODE_ENV === 'production' && missingStrongJwtSecret
+    ? crypto.randomBytes(48).toString('hex')
+    : configuredJwtSecret || DEFAULT_JWT_SECRET;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? '*';
 const ORIGIN_ALLOWLIST = CLIENT_ORIGIN.split(',')
   .map((entry) => entry.trim())
   .filter(Boolean);
 const ALLOW_ALL_ORIGINS = ORIGIN_ALLOWLIST.includes('*');
 
-if (process.env.NODE_ENV === 'production' && JWT_SECRET === 'change-me-in-production') {
-  throw new Error('Set a strong JWT_SECRET in production.');
+if (NODE_ENV === 'production' && missingStrongJwtSecret) {
+  console.warn(
+    '[security] JWT_SECRET is not set. Using a temporary runtime secret; existing tokens will be invalid after restart. Configure JWT_SECRET in environment variables.',
+  );
 }
 
 const DEFAULT_DB = {
