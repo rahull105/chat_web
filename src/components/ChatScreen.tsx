@@ -507,17 +507,21 @@ export function ChatScreen({ theme, onToggleTheme }: ChatScreenProps) {
       }
 
       peer.ontrack = (event) => {
-        const [streamFromEvent] = event.streams;
-        if (streamFromEvent) {
-          setRemoteStream(streamFromEvent);
-          return;
-        }
+        const incomingTracks =
+          event.streams.length > 0
+            ? event.streams.flatMap((streamFromEvent) => streamFromEvent.getTracks())
+            : [event.track];
 
-        // Safari can deliver tracks without prebuilt stream objects.
+        // Some browsers emit audio/video tracks separately; merge by track id.
         setRemoteStream((previous) => {
-          const stream = previous ?? new MediaStream();
-          stream.addTrack(event.track);
-          return stream;
+          const byTrackId = new Map<string, MediaStreamTrack>();
+          for (const track of previous?.getTracks() ?? []) {
+            byTrackId.set(track.id, track);
+          }
+          for (const track of incomingTracks) {
+            byTrackId.set(track.id, track);
+          }
+          return new MediaStream([...byTrackId.values()]);
         });
       };
 
@@ -734,8 +738,10 @@ export function ChatScreen({ theme, onToggleTheme }: ChatScreenProps) {
       if (!remoteStream || callSession?.type !== 'video') {
         remoteVideoRef.current.srcObject = null;
       } else {
-        remoteVideoRef.current.srcObject = remoteStream;
-        remoteVideoRef.current.muted = speakerMuted;
+        const remoteVideoTracks = remoteStream.getVideoTracks();
+        remoteVideoRef.current.srcObject =
+          remoteVideoTracks.length > 0 ? new MediaStream(remoteVideoTracks) : null;
+        remoteVideoRef.current.muted = true;
         remoteVideoRef.current.volume = 1;
         void remoteVideoRef.current.play().catch(() => {
           // Autoplay can fail silently on some browsers until user gesture.
@@ -744,10 +750,12 @@ export function ChatScreen({ theme, onToggleTheme }: ChatScreenProps) {
     }
 
     if (remoteAudioRef.current) {
-      if (!remoteStream || callSession?.type !== 'audio') {
+      if (!remoteStream) {
         remoteAudioRef.current.srcObject = null;
       } else {
-        remoteAudioRef.current.srcObject = remoteStream;
+        const remoteAudioTracks = remoteStream.getAudioTracks();
+        remoteAudioRef.current.srcObject =
+          remoteAudioTracks.length > 0 ? new MediaStream(remoteAudioTracks) : null;
         remoteAudioRef.current.muted = speakerMuted;
         remoteAudioRef.current.volume = 1;
         void remoteAudioRef.current.play().catch(() => {
