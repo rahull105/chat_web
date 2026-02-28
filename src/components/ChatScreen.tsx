@@ -210,6 +210,7 @@ export function ChatScreen() {
   const localStreamRef = useRef<MediaStream | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const callSessionRef = useRef<CallSession | null>(null);
   const activeChatIdRef = useRef<string | null>(null);
 
@@ -588,16 +589,48 @@ export function ChatScreen() {
   }, [activeChatId, activeKey, activeMessages]);
 
   useEffect(() => {
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = localStream;
+    if (!localVideoRef.current) {
+      return;
     }
-  }, [localStream]);
+
+    if (!localStream) {
+      localVideoRef.current.srcObject = null;
+      return;
+    }
+
+    localVideoRef.current.srcObject = localStream;
+    void localVideoRef.current.play().catch(() => {
+      // Autoplay can fail silently on some browsers until user gesture.
+    });
+  }, [callSession, localStream]);
 
   useEffect(() => {
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = remoteStream;
+    if (callSession?.type === 'video' && remoteVideoRef.current) {
+      if (!remoteStream) {
+        remoteVideoRef.current.srcObject = null;
+      } else {
+        remoteVideoRef.current.srcObject = remoteStream;
+        void remoteVideoRef.current.play().catch(() => {
+          // Autoplay can fail silently on some browsers until user gesture.
+        });
+      }
     }
-  }, [remoteStream]);
+
+    if (callSession?.type === 'audio' && remoteAudioRef.current) {
+      if (!remoteStream) {
+        remoteAudioRef.current.srcObject = null;
+      } else {
+        remoteAudioRef.current.srcObject = remoteStream;
+        void remoteAudioRef.current.play().catch(() => {
+          // Autoplay can fail silently on some browsers until user gesture.
+        });
+      }
+    }
+
+    if (callSession?.type === 'video' && remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = null;
+    }
+  }, [callSession, remoteStream]);
 
   useEffect(() => {
     callSessionRef.current = callSession;
@@ -1931,6 +1964,7 @@ export function ChatScreen() {
                 </>
               ) : (
                 <div className="audio-call-badge">
+                  <audio ref={remoteAudioRef} autoPlay playsInline />
                   <Mic size={32} />
                   <p>Audio call active</p>
                 </div>
